@@ -1,7 +1,8 @@
 // SectionControl.cpp
 // Implémentation du contrôle de sections pour AutoSteer Teensy 4.1
-// Configuration adaptée au PCB Triple CAN avec Mode Manuel/Auto
-//Inspiration code Daniel Desmartins
+// Configuration adaptée au PCB Triple CAN avec Mode Manuel/Auto + Support I2C XL9535
+// Inspiration code Daniel Desmartins
+
 /* 
  * PINS RÉSERVÉS (NE PAS UTILISER) :
  * ----------------------------------
@@ -21,7 +22,9 @@
 #include "SectionControl.h"
 #include <NativeEthernet.h>
 #include <NativeEthernetUdp.h>
+
 unsigned int AOGPort = 9999;
+
 // Déclarations forward des fonctions
 void sendHelloToAgIO();
 void sendSectionStatus();
@@ -64,6 +67,18 @@ uint8_t raiseTimer = 0, lowerTimer = 0, lastTrigger = 0;
 uint8_t teensy_pins[] = {39,27,28,32,36,37,26,11};
 uint8_t NUM_CONFIGURABLE_PINS = sizeof(teensy_pins) / sizeof(teensy_pins[0]);
 
+// ============================================================================
+// VARIABLES I2C XL9535
+// ============================================================================
+// Registres XL9535
+#define XL9535_INPUT_PORT0   0x00
+#define XL9535_INPUT_PORT1   0x01
+#define XL9535_OUTPUT_PORT0  0x02
+#define XL9535_OUTPUT_PORT1  0x03
+#define XL9535_CONFIG_PORT0  0x06
+#define XL9535_CONFIG_PORT1  0x07
+
+uint16_t i2cRelayStates = 0; // État de tous les relais I2C (16 bits)
 
 // CONFIGURATION MODE MANUEL - MODIFIER CES PINS SELON VOS BESOINS
 // Pin pour l'interrupteur Mode Auto/Manuel
@@ -88,8 +103,6 @@ const uint16_t HYDRAULIC_LOOP_TIME = 200; // 200ms = 5Hz
 // ============================================================================
 // VARIABLES MODE MANUEL
 // ============================================================================
-
-// Variables pour le mode manuel/auto (accessibles depuis le .ino principal)
 bool autoModeIsOn = true;          // Mode actuel (true = Auto, false = Manuel)
 
 // Variables locales pour la communication avec AgOpenGPS
@@ -102,6 +115,65 @@ uint32_t lastHelloTime = 0;
 const uint16_t HELLO_LOOP_TIME = 2000; // 2 secondes
 
 // ============================================================================
+// FONCTIONS I2C XL9535
+// ============================================================================
+
+void initXL9535()
+{
+#if SC_I2C
+    Wire.begin();
+    delay(50);
+    
+    // Configurer tous les pins en sortie (0 = output, 1 = input)
+    Wire.beginTransmission(XL9535_ADDRESS);
+    Wire.write(XL9535_CONFIG_PORT0);
+    Wire.write(0x00); // Port 0 (relais 0-7) en sortie
+    Wire.write(0x00); // Port 1 (relais 8-15) en sortie
+    uint8_t error = Wire.endTransmission();
+    
+    if (error == 0)
+    {
+        Serial.println("✓ XL9535 initialized successfully");
+        
+        // Éteindre tous les relais au démarrage
+        i2cRelayStates = aogConfig.isRelayActiveHigh ? 0x0000 : 0xFFFF;
+        updateAllI2CRelays();
+    }
+    else
+    {
+        Serial.print("✗ XL9535 initialization failed! Error: ");
+        Serial.println(error);
+    }
+#endif
+}
+
+void setI2CRelay(uint8_t relayNumber, bool state)
+{
+#if SC_I2C
+    if (relayNumber >= 16) return; // Sécurité
+    
+    // Appliquer la logique active high/low
+    bool physicalState = aogConfig.isRelayActiveHigh ? state : !state;
+    
+    if (physicalState)
+        i2cRelayStates |= (1 << relayNumber);
+    else
+        i2cRelayStates &= ~(1 << relayNumber);
+#endif
+}
+
+void updateAllI2CRelays()
+{
+#if SC_I2C
+    Wire.beginTransmission(XL9535_ADDRESS);
+    Wire.write(XL9535_OUTPUT_PORT0);
+    Wire.write(i2cRelayStates & 0xFF);        // Port 0 (relais 0-7)
+    Wire.write((i2cRelayStates >> 8) & 0xFF); // Port 1 (relais 8-15)
+    Wire.endTransmission();
+#endif
+}
+
+// ============================================================================
 // SETUP
 // ============================================================================
 
@@ -110,7 +182,17 @@ void sectionControlSetup()
     EEPROM.get(120, pin); 
     
     Serial.println("\r\n=== Section Control Configuration ===");
-    Serial.println("AgOpenGPS Pin Mapping:");
+    
+#if SC_I2C
+    Serial.println("*** MODE I2C ACTIVÉ ***");
+    Serial.print("XL9535 Address: 0x");
+    Serial.println(XL9535_ADDRESS, HEX);
+    initXL9535();
+#else
+    Serial.println("*** MODE GPIO TEENSY ACTIVÉ ***");
+#endif
+    
+    Serial.println("\nAgOpenGPS Pin Mapping:");
     Serial.println("--------------------------------------");
     
     for (uint8_t i = 0; i < NUM_CONFIGURABLE_PINS; i++)
@@ -147,12 +229,19 @@ void sectionControlSetup()
             Serial.print("GeoStop");
         }
         
+#if SC_I2C
+        Serial.print("          |    I2C Relay ");
+        if (i < 10) Serial.print(" ");
+        Serial.println(i);
+#else
         Serial.print("          |    Teensy Pin ");
         if (teensy_pins[i] < 10) Serial.print(" ");
         Serial.println(teensy_pins[i]);
+#endif
     }
 
-    // Initialiser les pins de sortie (relais)
+#if !SC_I2C
+    // Initialiser les pins de sortie (relais) uniquement en mode GPIO
     Serial.println("\nInitializing Physical Output Pins:");
     for (uint8_t i = 0; i < NUM_CONFIGURABLE_PINS; i++)
     {
@@ -163,6 +252,7 @@ void sectionControlSetup()
         Serial.print(teensy_pins[i]);
         Serial.println(" ready");
     }
+#endif
 
     // Initialiser le pin Mode Auto/Manuel avec pullup interne
     pinMode(PIN_MODE_AUTO_MANUAL, INPUT_PULLUP);
@@ -247,19 +337,16 @@ void sectionControlLoop()
         
         processHydraulicLift();
         
-        // Dans sectionControlLoop()
-// ...
-if (autoModeIsOn)
-{
-    // Mode AUTO - Contrôle par AgOpenGPS
-    processAutoMode();
+        if (autoModeIsOn)
+        {
+            // Mode AUTO - Contrôle par AgOpenGPS
+            processAutoMode();
         }
         else
         {
             // Mode MANUEL - Contrôle par interrupteurs
             processManualMode();
-}
-
+        }
         
         SetRelays();
         sendSectionStatus();
@@ -322,8 +409,6 @@ void processManualMode()
             }
         }
     }
-    
-    
 }
 
 // ============================================================================
@@ -391,7 +476,7 @@ void processHydraulicLift()
 }
 
 // ============================================================================
-// SET RELAYS - Appliquer les états aux sorties physiques
+// SET RELAYS - Appliquer les états aux sorties physiques ou I2C
 // ============================================================================
 
 void SetRelays()
@@ -412,11 +497,61 @@ void SetRelays()
     // GeoStop
     relayState[20] = 0;
     
-    // Éteindre tous les pins configurables
+#if SC_I2C
+    // *** MODE I2C ***
+    // Ne pas réinitialiser brutalement, on va mettre à jour relais par relais
+    
+    // Appliquer les états selon le mapping
     for (uint8_t i = 0; i < NUM_CONFIGURABLE_PINS; i++)
     {
-        digitalWrite(teensy_pins[i], aogConfig.isRelayActiveHigh ? LOW : HIGH);
+        uint8_t functionAssigned = pin[i];
+        
+        if (functionAssigned > 0 && functionAssigned <= 21)
+        {
+            uint8_t i2cRelayNumber = i; // Mapping direct : position 0 → relais I2C 0, etc.
+            bool logicalState = false;
+            
+            // Sections 1-16
+            if (functionAssigned >= 1 && functionAssigned <= 16)
+            {
+                logicalState = relayState[functionAssigned - 1];
+            }
+            // Hyd Up (fonction 17)
+            else if (functionAssigned == 17)
+            {
+                logicalState = relayState[16];
+            }
+            // Hyd Down (fonction 18)
+            else if (functionAssigned == 18)
+            {
+                logicalState = relayState[17];
+            }
+            // Tram Right (fonction 19)
+            else if (functionAssigned == 19)
+            {
+                logicalState = relayState[18];
+            }
+            // Tram Left (fonction 20)
+            else if (functionAssigned == 20)
+            {
+                logicalState = relayState[19];
+            }
+            // GeoStop (fonction 21)
+            else if (functionAssigned == 21)
+            {
+                logicalState = relayState[20];
+            }
+            
+            setI2CRelay(i2cRelayNumber, logicalState);
+        }
     }
+    
+    // Envoyer la mise à jour vers le module I2C
+    updateAllI2CRelays();
+    
+#else
+    // *** MODE GPIO TEENSY ***
+    // Ne pas éteindre tous les pins, on va les mettre à jour directement
     
     // Appliquer les états selon le mapping
     for (uint8_t i = 0; i < NUM_CONFIGURABLE_PINS; i++)
@@ -464,6 +599,7 @@ void SetRelays()
             digitalWrite(physicalPin, physicalState ? HIGH : LOW);
         }
     }
+#endif
 }
 
 // ============================================================================
@@ -552,23 +688,6 @@ void handlePGN239(uint8_t* autoSteerUdpData)
     // Commandes des sections 1-8 et 9-16
     uint8_t receivedRelay = autoSteerUdpData[11];  
     uint8_t receivedRelayHi = autoSteerUdpData[12]; 
-    
-    // --- Logique d'Inversion et de Débogage RAW ---
-    
-    // DEBUG - Afficher ce qui est reçu AVANT inversion
-    static uint32_t lastDebugTime = 0;
-    if (millis() - lastDebugTime > 1000)
-    
-    
-//    // Inversion des commandes de tram et de section si les relais sont actifs HIGH
-//    if (aogConfig.isRelayActiveHigh)
-//    {
-//        tram = 255 - tram;
-//        receivedRelay = 255 - receivedRelay;
-//        receivedRelayHi = 255 - receivedRelayHi;
-//    }
-    
-    // --- Application des Commandes (Mode AUTO) ---
     
     // Mettre à jour relay et relayHi UNIQUEMENT si le mode AUTO est actif.
     if (autoModeIsOn) 

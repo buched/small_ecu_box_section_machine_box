@@ -505,15 +505,6 @@ void ReceiveUdp()
 					watchdogTimer = 0;  //reset watchdog
 				}
 
-				//Bit 10 Tram
-				tram = autoSteerUdpData[10];
-
-				//Bit 11
-				relay = autoSteerUdpData[11];
-
-				//Bit 12
-				relayHi = autoSteerUdpData[12];
-
 				//----------------------------------------------------------------------------
 				//Serial Send to agopenGPS
 

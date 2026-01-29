@@ -11,12 +11,12 @@ uint64_t KeyaPGN = 0x06000001;
 
 const bool debugKeya = true;
 
-void keyaSend(uint8_t data[]) {
+void keyaSend(uint8_t data[], size_t length) {
   CAN_message_t KeyaBusSendData;
   KeyaBusSendData.id = KeyaPGN;
   KeyaBusSendData.flags.extended = true;
   KeyaBusSendData.len = 8;
-  memcpy(KeyaBusSendData.buf, data, sizeof(data));
+  memcpy(KeyaBusSendData.buf, data, length);
   Keya_Bus.write(KeyaBusSendData);
 }
 
