@@ -722,12 +722,12 @@ void ReceiveUdp()
             {
                 aogConfig.raiseTime = autoSteerUdpData[5];
                 aogConfig.lowerTime = autoSteerUdpData[6];
-                aogConfig.enableToolLift = autoSteerUdpData[7];
+                //aogConfig.enableToolLift = autoSteerUdpData[7];
 
                 //set1 
                 uint8_t sett = autoSteerUdpData[8];  //setting0     
                 if (bitRead(sett, 0)) aogConfig.isRelayActiveHigh = 1; else aogConfig.isRelayActiveHigh = 0;
-
+                if (bitRead(sett, 1)) aogConfig.enableToolLift = 1; else aogConfig.enableToolLift = 0;  
                 aogConfig.user1 = autoSteerUdpData[9];
                 aogConfig.user2 = autoSteerUdpData[10];
                 aogConfig.user3 = autoSteerUdpData[11];
@@ -773,4 +773,5 @@ void EncoderFunc()
 		encEnable = false;
 	}
 }
+
 
