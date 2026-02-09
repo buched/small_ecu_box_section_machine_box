@@ -359,6 +359,8 @@ void autosteerLoop()
       }
 		}
 
+		switchByte = 0;
+		switchByte |= (steerSwitch << 2);
 		switchByte |= (steerSwitch << 1);   //put steerswitch status in bit 1 position
 		switchByte |= workSwitch;
 
@@ -771,3 +773,4 @@ void EncoderFunc()
 		encEnable = false;
 	}
 }
+
