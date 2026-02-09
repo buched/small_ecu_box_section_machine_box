@@ -121,15 +121,15 @@ const uint16_t HELLO_LOOP_TIME = 2000; // 2 secondes
 void initXL9535()
 {
 #if SC_I2C
-    Wire.begin();
+    Wire2.begin();
     delay(50);
     
     // Configurer tous les pins en sortie (0 = output, 1 = input)
-    Wire.beginTransmission(XL9535_ADDRESS);
-    Wire.write(XL9535_CONFIG_PORT0);
-    Wire.write(0x00); // Port 0 (relais 0-7) en sortie
-    Wire.write(0x00); // Port 1 (relais 8-15) en sortie
-    uint8_t error = Wire.endTransmission();
+    Wire2.beginTransmission(XL9535_ADDRESS);
+    Wire2.write(XL9535_CONFIG_PORT0);
+    Wire2.write(0x00); // Port 0 (relais 0-7) en sortie
+    Wire2.write(0x00); // Port 1 (relais 8-15) en sortie
+    uint8_t error = Wire2.endTransmission();
     
     if (error == 0)
     {
@@ -165,11 +165,11 @@ void setI2CRelay(uint8_t relayNumber, bool state)
 void updateAllI2CRelays()
 {
 #if SC_I2C
-    Wire.beginTransmission(XL9535_ADDRESS);
-    Wire.write(XL9535_OUTPUT_PORT0);
-    Wire.write(i2cRelayStates & 0xFF);        // Port 0 (relais 0-7)
-    Wire.write((i2cRelayStates >> 8) & 0xFF); // Port 1 (relais 8-15)
-    Wire.endTransmission();
+    Wire2.beginTransmission(XL9535_ADDRESS);
+    Wire2.write(XL9535_OUTPUT_PORT0);
+    Wire2.write(i2cRelayStates & 0xFF);        // Port 0 (relais 0-7)
+    Wire2.write((i2cRelayStates >> 8) & 0xFF); // Port 1 (relais 8-15)
+    Wire2.endTransmission();
 #endif
 }
 

@@ -24,41 +24,40 @@ void CAN_Setup() {
   Keya_Bus.begin();
   Keya_Bus.setBaudRate(250000);
   K_Bus.begin();
-  if (Brand == 5) K_Bus.setBaudRate(500000);
+  if (Brand == 5) K_Bus.setBaudRate(100000);// Vitesse spécifique au Com3
   else K_Bus.setBaudRate(250000);
   K_Bus.enableFIFO();
   K_Bus.setFIFOFilter(REJECT_ALL);
-    switch (Brand)
-    {
-      case 0:
+  if (Brand == 0)
+        {
           K_Bus.setFIFOFilter(0, 0x18EF1CD2, EXT);  //Claas Engage Message
           K_Bus.setFIFOFilter(1, 0x1CFFE6D2, EXT);  //Claas Work Message (CEBIS Screen MR Models)
-          break;
-      case 1:
+        }
+      if (Brand == 1)
+        {
           K_Bus.setFIFOFilter(0, 0x18EF1C32, EXT);  //Valtra Engage Message
           K_Bus.setFIFOFilter(1, 0x18EF1CFC, EXT);  //Mccormick Engage Message
           K_Bus.setFIFOFilter(2, 0x18EF1C00, EXT);  //MF Engage Message
-        break;
-      case 2:
+        }
+      if (Brand == 2)
+        {
           K_Bus.setFIFOFilter(0, 0x14FF7706, EXT);  //CaseIH Engage Message
           K_Bus.setFIFOFilter(1, 0x18FE4523, EXT);  //CaseIH Rear Hitch Infomation
           K_Bus.setFIFOFilter(2, 0x18FF1A03, EXT);  //CaseIH Engage Message
-        break;
-      case 3:
+        }
+      if (Brand == 3)
+        {
           K_Bus.setFIFOFilter(0, 0x613, STD);  //Fendt Engage
-        break;
-      case 4:
+        }
+      if (Brand == 4)
+        {
           K_Bus.setFIFOFilter(0, 0x18EFAB27, EXT);  //JCB engage message
-        break;
-      case 5:
-          K_Bus.setFIFOFilter(0, 0xCFFD899, EXT);  //FendtOne Engage
-        break;
-      default:
-        Serial.println("No brand selected");
-        break;
-    }
+        }
+      if (Brand == 5)
+        {
+          K_Bus.setFIFOFilter(0, 0x61F, STD);  //Fendt COM3
+        }
   delay(1000);
-  if (debugKeya) Serial.println("Initialised Keya CANBUS");
 }
 
 bool isPatternMatch(const CAN_message_t& message, const uint8_t* pattern, size_t patternSize) {
@@ -209,15 +208,7 @@ void KeyaBus_Receive()
                   eng();
                 }
             }
-           if (aogConfig.isRelayActiveHigh == 1)
-                {
-                  if (KBusReceiveData.id == 0x18FE4523)
-                    {
-                      KBUSRearHitch = (KBusReceiveData.buf[0]);
-                      if (KBUSRearHitch < aogConfig.user1) workCAN = 1;
-                      else workCAN = 0;
-                    }   
-                }
+
         }
       if (Brand == 3)
         {
@@ -245,14 +236,20 @@ void KeyaBus_Receive()
         }
       if (Brand == 5)
       {
-          if (KBusReceiveData.id == 0xCFFD899)   //**FendtOne Engage Message**  
+          if (KBusReceiveData.id == 0x61F)   //**Fendt COM3 **  
           {
-            if ((KBusReceiveData.buf[3])== 0xF6)
+            if (KBusReceiveData.buf[0]==0x15 && KBusReceiveData.buf[1]==0x35 && KBusReceiveData.buf[4]==0x80)
             {   
                 eng();
             }
           }
       }
+      if (KBusReceiveData.id == 0x18FE4523)
+        {
+          KBUSRearHitch = (KBusReceiveData.buf[0]);
+          if (KBUSRearHitch < aogConfig.user1) workCAN = 1;
+          else workCAN = 0;
+        }
     }
 }
 
@@ -273,6 +270,93 @@ void eng()
                             {
                               engageCAN = false;
                               lastIdActive = 0;
+                              lastpush = myTime; //mod test thibault
                             }
                       }
+}
+
+void pressGo()
+{
+    CAN_message_t msg;
+    msg.id = 0x61F;
+    msg.len = 8;
+    //msg.flags.extended = false;
+    for (uint8_t i = 0; i < sizeof(goPress); i++)
+    {
+        msg.buf[i] = goPress[i];
+    }
+    K_Bus.write(msg);
+    goDown = true;
+}
+
+void liftGo()
+{
+    CAN_message_t msg;
+    msg.id = 0x61F;
+    msg.len = 8;
+    //msg.flags.extended = false;
+     for (uint8_t i = 0; i < sizeof(goLift); i++)
+     {
+         msg.buf[i] = goLift[i];
+     }
+    K_Bus.write(msg);    
+    goDown = false;
+}
+
+void pressEnd()
+{
+    CAN_message_t msg;
+    msg.id = 0x61F;
+    msg.len = 8;
+    //msg.flags.extended = false;
+     for (uint8_t i = 0; i < sizeof(endPress); i++)
+     {
+         msg.buf[i] = endPress[i];
+     }
+    K_Bus.write(msg);
+    endDown = true;
+}
+
+void liftEnd()
+{
+    CAN_message_t msg;
+    msg.id = 0x61F;
+    msg.len = 8;
+    //msg.flags.extended = false;
+     for (uint8_t i = 0; i < sizeof(endLift); i++)
+     {
+         msg.buf[i] = endLift[i];
+     }
+    K_Bus.write(msg);
+    endDown = false;
+}
+
+// CLAAS CSM buttons Start
+void pressCSM1()
+{                                     
+     CAN_message_t buttonData;
+     buttonData.id = 0x14204146;
+     buttonData.flags.extended = true;
+     buttonData.len = 8;
+     for (uint8_t i = 0; i < sizeof(csm1Press); i++)
+     {
+         buttonData.buf[i] = csm1Press[i];
+     }
+     K_Bus.write(buttonData);
+     goDown = true;
+     Serial.println("Press CSM1");
+}
+
+void pressCSM2() {
+     CAN_message_t buttonData;
+     buttonData.id = 0x14204146;
+     buttonData.flags.extended = true;
+     buttonData.len = 8;
+     for (uint8_t i = 0; i < sizeof(csm2Press); i++)
+     {
+         buttonData.buf[i] = csm2Press[i];
+     }
+    K_Bus.write(buttonData);
+    endDown = true;
+    Serial.println("Press CSM2");
 }

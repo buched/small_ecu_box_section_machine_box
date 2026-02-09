@@ -21,7 +21,7 @@
 /////////////////////////////////////////////
 
 // if not in eeprom, overwrite
-#define EEP_Ident 2402
+#define EEP_Ident 2404
 
 
 //--------------------------- Switch Input Pins ------------------------
@@ -95,10 +95,22 @@ uint8_t tram = 0;
  uint8_t pgn = 0, dataLength = 0, idx = 0;
 boolean goDown = false, endDown = false , bitState = false, bitStateOld = false;  //CAN Hitch Control
 byte hydLift = 0;
-byte goPress[8]        = {0x15, 0x20, 0x06, 0xCA, 0x80, 0x01, 0x00, 0x00} ;    //  press big go
-byte goLift[8]         = {0x15, 0x20, 0x06, 0xCA, 0x00, 0x02, 0x00, 0x00} ;    //  lift big go
-byte endPress[8]       = {0x15, 0x21, 0x06, 0xCA, 0x80, 0x03, 0x00, 0x00} ;    //  press big end
-byte endLift[8]        = {0x15, 0x21, 0x06, 0xCA, 0x00, 0x04, 0x00, 0x00} ;    //  lift big end
+// brand = 5
+byte goPress[8]        = {0x15, 0x33, 0x1E, 0xCA, 0x80, 0x01, 0x00, 0x00} ;    //  press big go
+byte goLift[8]         = {0x15, 0x33, 0x1E, 0xCA, 0x00, 0x02, 0x00, 0x00} ;    //  lift big go
+byte endPress[8]       = {0x15, 0x34, 0x1E, 0xCA, 0x80, 0x03, 0x00, 0x00} ;    //  press big end
+byte endLift[8]        = {0x15, 0x34, 0x1E, 0xCA, 0x00, 0x04, 0x00, 0x00} ;    //  lift big end
+// brand = 3
+//byte goPress[8]        = {0x15, 0x20, 0x06, 0xCA, 0x80, 0x01, 0x00, 0x00} ;    //  press big go
+//byte goLift[8]         = {0x15, 0x20, 0x06, 0xCA, 0x00, 0x02, 0x00, 0x00} ;    //  lift big go
+//byte endPress[8]       = {0x15, 0x21, 0x06, 0xCA, 0x80, 0x03, 0x00, 0x00} ;    //  press big end
+//byte endLift[8]        = {0x15, 0x21, 0x06, 0xCA, 0x00, 0x04, 0x00, 0x00} ;    //  lift big end
+// autres valeurs a test
+//byte goPress[8]        = {0x15, 0x22, 0x06, 0xCA, 0x80, 0x01, 0x00, 0x00} ;    //  press little go
+//byte goLift[8]         = {0x15, 0x22, 0x06, 0xCA, 0x00, 0x02, 0x00, 0x00} ;    //  lift little go
+//byte endPress[8]       = {0x15, 0x23, 0x06, 0xCA, 0x80, 0x03, 0x00, 0x00} ;    //  press little end
+//byte endLift[8]        = {0x15, 0x23, 0x06, 0xCA, 0x00, 0x04, 0x00, 0x00} ;    //  lift little end
+
 
 byte csm1Press[8] = { 0xF1, 0xFC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x67 }; // CLAAS CSM1 button press pre MR tractors
 byte csm2Press[8] = { 0xF4, 0xFC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x3F }; // CLAAS CSM2 button press pre MR tractors
@@ -116,10 +128,16 @@ bool engageCAN = false;          //Variable for Engage from CAN
 bool workCAN = false;
 long unsigned int lastIdActive = 0;
 uint8_t KBUSRearHitch = 250;    //Variable for hitch height from KBUS (0-250 *0.4 = 0-100%) - CaseIH tractor bus
+
+uint8_t countHyd = 0; // Compteur pour le temps d'appui bouton Fendt
+
 uint32_t myTime;
 uint32_t lastpush;
 uint32_t Time;
 uint32_t relayTime;
+
+uint8_t lastHydLift = 0;
+uint32_t lastpushbutton = 0;
 
 //speed sent as *10
 float gpsSpeed = 0;
@@ -238,7 +256,11 @@ void autosteerSetup()
 	}
 
 	steerSettingsInit();
-  sectionControlSetup(); // ajoutés par FlorianT
+  if (sectionout == 1)
+      {
+        sectionControlSetup(); // ajoutés par FlorianT
+      }
+  
 	if (Autosteer_running)
 	{
 		Serial.println("Autosteer running, waiting for AgOpenGPS");
@@ -291,7 +313,11 @@ void autosteerLoop()
 		else if (steerConfig.SteerButton == 1)    //steer Button momentary
 		{
 			reading = digitalRead(STEERSW_PIN);
-      if (engageCAN) reading = LOW;              //CAN Engage is ON (Button is Pressed)
+      if (engageCAN)
+      {
+        reading = LOW;              //CAN Engage is ON (Button is Pressed)
+        engageCAN = false;          //mod test thibault
+      }
 			if (reading == LOW && previous == HIGH)
 			{
 				if (currentState == 1)
@@ -359,6 +385,8 @@ void autosteerLoop()
       }
 		}
 
+    switchByte = 0;
+    switchByte |= (steerSwitch << 2);
 		switchByte |= (steerSwitch << 1);   //put steerswitch status in bit 1 position
 		switchByte |= workSwitch;
 
@@ -415,37 +443,18 @@ void autosteerLoop()
   			motorDrive(); //out to motors the pwm value
   			pulseCount = 0;
   		}
+     if (Brand == 3 || Brand == 5) SetRelaysFendt();  //If Brand = Fendt run the hitch control bottom of this page
+     if (Brand == 0) SetRelaysClaas();  //If Brand = Claas run the hitch control bottom of this page
 	} //end of timed loop
 
 	//This runs continuously, outside of the timed loop, keeps checking for new udpData, turn sense
 	//delay(1);
 
-	// Speed pulse
-	if (gpsSpeedUpdateTimer < 1000)
-	{
-		if (speedPulseUpdateTimer > 200) // 100 (10hz) seems to cause tone lock ups occasionally
-		{
-			speedPulseUpdateTimer = 0;
+  if (sectionout == 1)
+      {
+        sectionControlLoop(); // ajout FlorianT
+      }
 
-			//130 pp meter, 3.6 kmh = 1 m/sec = 130hz or gpsSpeed * 130/3.6 or gpsSpeed * 36.1111
-			//gpsSpeed = ((float)(autoSteerUdpData[5] | autoSteerUdpData[6] << 8)) * 0.1;
-			float speedPulse = gpsSpeed * 36.1111;
-
-			//Serial.print(gpsSpeed); Serial.print(" -> "); Serial.println(speedPulse);
-
-			if (gpsSpeed > 0.11) { // 0.10 wasn't high enough
-				tone(velocityPWM_Pin, uint16_t(speedPulse));
-			}
-			else {
-				noTone(velocityPWM_Pin);
-			}
-		}
-	}
-	else  // if gpsSpeedUpdateTimer hasn't update for 1000 ms, turn off speed pulse
-	{
-		noTone(velocityPWM_Pin);
-	}
-sectionControlLoop(); // ajout FlorianT
 
 } // end of main loop
 
@@ -711,11 +720,12 @@ void ReceiveUdp()
             {
                 aogConfig.raiseTime = autoSteerUdpData[5];
                 aogConfig.lowerTime = autoSteerUdpData[6];
-                aogConfig.enableToolLift = autoSteerUdpData[7];
+                //aogConfig.enableToolLift = autoSteerUdpData[7];
 
                 //set1 
                 uint8_t sett = autoSteerUdpData[8];  //setting0     
                 if (bitRead(sett, 0)) aogConfig.isRelayActiveHigh = 1; else aogConfig.isRelayActiveHigh = 0;
+                if (bitRead(sett,1)) aogConfig.enableToolLift = 1; else aogConfig.enableToolLift = 0;  
 
                 aogConfig.user1 = autoSteerUdpData[9];
                 aogConfig.user2 = autoSteerUdpData[10];
@@ -761,4 +771,59 @@ void EncoderFunc()
 		pulseCount++;
 		encEnable = false;
 	}
+}
+
+//Hitch Control------------------------------------------------------------
+void SetRelaysFendt(void)
+{
+  uint32_t currentMillis = millis();
+
+
+  if (currentMillis - lastpushbutton >= 300) {
+      if (goDown)  liftGo();  
+      if (endDown) liftEnd();
+  }
+
+//If Invert Relays is selected in hitch settings, Section 1 is used as trigger.
+  if (aogConfig.isRelayActiveHigh == 1){
+    bitState = (bitRead(relay, 0));
+  }
+//If not selected hitch command is used on headland used as Trigger  
+  else{
+    if (hydLift == 1) {bitState = 1;}
+    if (hydLift == 2) {bitState = 0;}
+}
+if (aogConfig.enableToolLift == 1){
+  if (bitState  && !bitStateOld) 
+    {
+      lastpushbutton = currentMillis;
+    }
+  if (!bitState && bitStateOld) 
+  {
+    pressEnd(); //Press End button - CAN Page
+    lastpushbutton = currentMillis;
+  }
+}
+bitStateOld = bitState;
+}
+
+
+void SetRelaysClaas(void)
+{
+//If Invert Relays is selected in hitch settings, Section 1 is used as trigger.  
+if (aogConfig.isRelayActiveHigh == 1){
+    bitState = (bitRead(relay, 0));
+  }
+//If not selected hitch command is used on headland used as Trigger  
+  else{
+    if (hydLift == 1) bitState = 1;
+    if (hydLift == 2) bitState = 0;    
+  }
+//Only if tool lift is enabled AgOpen will press headland buttions via CAN
+if (aogConfig.enableToolLift == 1){
+  if (bitState  && !bitStateOld) pressCSM1(); //Press Go button - CAN Page
+  if (!bitState && bitStateOld) pressCSM2(); //Press End button - CAN Page
+}
+
+  bitStateOld = bitState;
 }
