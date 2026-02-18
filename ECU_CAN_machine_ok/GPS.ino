@@ -1,8 +1,3 @@
-
-#define GPS Serial3
-char rxbuffer[512];         //Extra serial rx buffer
-char txbuffer[512];         //Extra serial tx buffer
-
 char nmeaBuffer[200];
 int count=0;
 bool stringComplete = false;
@@ -11,20 +6,20 @@ int test = 0;
 
 //**************************************************************
 
-void GPS_setup()
-{
-  if(gpsMode == 1 || gpsMode == 3)  GPS.begin(115200);
-  else GPS.begin(460800);
-  GPS.addMemoryForRead(rxbuffer, 512);
-  GPS.addMemoryForWrite(txbuffer, 512);
-
-  // the dash means wildcard
-  parser.setErrorHandler(errorHandler);
-  parser.addHandler("G-GGA", GGA_Handler);
-  parser.addHandler("G-VTG", VTG_Handler);
-  parser.addHandler("G-ZDA", ZDA_Handler);
-
-}
+//void GPS_setup()
+//{
+////  if(gpsMode == 1 || gpsMode == 3)  GPS.begin(115200);
+//  else GPS->begin(460800);
+//  GPS->addMemoryForRead(rxbuffer, 512);
+//  GPS->addMemoryForWrite(txbuffer, 512);
+//
+//  // the dash means wildcard
+//  parser.setErrorHandler(errorHandler);
+//  parser.addHandler("G-GGA", GGA_Handler);
+//  parser.addHandler("G-VTG", VTG_Handler);
+//  parser.addHandler("G-ZDA", ZDA_Handler);
+//
+//}
 
 //**************************************************************
 
@@ -97,9 +92,9 @@ void Read_IMU()
 
 void Panda_GPS()
 {
-    while (GPS.available())
+    while (GPS->available())
     {
-        parser << GPS.read();
+        parser << GPS->read();
     }
 }
 
@@ -107,9 +102,9 @@ void Panda_GPS()
 
 void Forward_GPS()
 {
-  while (GPS.available())
+  while (GPS->available())
   {
-    char c = GPS.read();
+    char c = GPS->read();
     nmeaBuffer[count++] = c;
     if(c == '\n')stringComplete = true;
     if(count == 200 || stringComplete == true)break;
@@ -142,7 +137,7 @@ void Forward_Ntrip()
         //Serial.write(NtripData, sizeof(NtripData)); 
         //Serial.write(10);
         //Serial.println("Ntrip Forwarded");
-        GPS.write(NtripData, NtripSize); 
+        GPS->write(NtripData, NtripSize); 
     }
 }
     
