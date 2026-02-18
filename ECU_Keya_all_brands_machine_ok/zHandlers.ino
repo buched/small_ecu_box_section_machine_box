@@ -16,9 +16,17 @@ char HDOP[5];
 char altitude[12];
 char ageDGPS[10];
 
+
 // VTG
 char vtgHeading[12] = { };
 char speedKnots[10] = { };
+
+
+// RMC (Recommended Minimum specific GNSS data) - AJOUTS FlorianT
+char rmcDate[7] = { };      // Date DDMMYY + \0
+char rmcMagVar[6] = { };    // Variation Magnétique (jusqu'à 999.9)
+char rmcMagEW[3] = { };     // Indicateur E/W
+
 
 // IMU
 char imuHeading[6];
@@ -66,15 +74,16 @@ void GGA_Handler() //Rec'd GGA
     {
        imuHandler();          //Get IMU data ready
        BuildNmea();           //Build & send data GPS data to AgIO (Both Dual & Single)
-
-        //digitalWrite(GPSRED_LED, HIGH);    //Turn red GPS LED ON, we have GGA and must have a IMU     
-        //digitalWrite(GPSGREEN_LED, LOW);   //Make sure the Green LED is OFF     
-
     }
-    else if (!useBNO08x) 
+    else if (useTM171)
     {
-        //digitalWrite(GPSRED_LED, blink);   //Flash red GPS LED, we have GGA but no IMU or dual
-        //digitalWrite(GPSGREEN_LED, LOW);   //Make sure the Green LED is OFF
+        imuTrigger = true;
+        imuTimer = 0;
+
+        BuildNmea();           //Build & send data GPS data to AgIO (Both Dual & Single)
+    }
+    else if (!useBNO08x && !useTM171) 
+    {
         itoa(65535, imuHeading, 10);       //65535 is max value to stop AgOpen using IMU in Panda
         BuildNmea();
     }
@@ -181,6 +190,32 @@ void imuHandler()
 
             // YawRate - 0 for now
             itoa(0, imuYawRate, 10);
+        }
+        else if (useTM171)
+        {
+
+
+            // Fill rest of Panda Sentence - Heading
+            itoa(YawV.fValue*10, imuHeading, 10);
+
+            if (!steerConfig.IsUseY_Axis)
+            {
+                // the pitch x100
+                itoa(PitchV.fValue*10, imuPitch, 10);
+
+                // the roll x100
+                itoa(RollV.fValue*10, imuRoll, 10);
+            }
+            else
+            {
+                // the pitch x100
+                itoa(RollV.fValue*10, imuPitch, 10);
+
+                // the roll x100
+                itoa(PitchV.fValue*10, imuRoll, 10);
+            }
+            // YawRate - 0 for now
+            itoa(0, imuYawRate, 10);   
         }
 }
 
@@ -380,6 +415,26 @@ void VTG_Handler()
 
   // vtg Speed knots
   parser.getArg(4, speedKnots);
+}
 
+
+void RMC_Handler() // Ajout FlorianT NMEAOUT
+{
+      // RMC: $GNRMC,093217.90,A,4346.25836945,N,00152.05424878,E,0.053,15.9,121225,1.2,E,D,C*78
+    // Index:  0       1 2    3    4    5    6    7     8     9      10
+    // Vider les tampons avant d'extraire de nouvelles données
+    // (Cela garantit que l'ancienne valeur ne subsiste pas si la nouvelle est vide)
+    memset(rmcDate, 0, sizeof(rmcDate));
+    memset(rmcMagVar, 0, sizeof(rmcMagVar));
+    memset(rmcMagEW, 0, sizeof(rmcMagEW));
+    
+    // 8. Date - (DDMMYY)
+    parser.getArg(8, rmcDate); 
+    
+    // 9. Magnetic Variation
+    parser.getArg(9, rmcMagVar);
+    
+    // 10. Magnetic Variation East/West indicator
+    parser.getArg(10, rmcMagEW);
 
 }

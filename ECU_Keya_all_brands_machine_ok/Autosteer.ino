@@ -16,20 +16,17 @@
 	 122hz = 1
 	 3921hz = 2
 */
-#define PWM_Frequency 0
-
 /////////////////////////////////////////////
 
 // if not in eeprom, overwrite
-#define EEP_Ident 2402
+#define EEP_Ident 2404
 
 
 //--------------------------- Switch Input Pins ------------------------
 #define STEERSW_PIN 6
 #define WORKSW_PIN 7
 
-//Define sensor pin for current or pressure sensor
-//#define CURRENT_SENSOR_PIN A17
+//Define sensor pin for pressure sensor
 #define PRESSURE_SENSOR_PIN A14
 
 #define CONST_180_DIVIDED_BY_PI 57.2957795130823
@@ -50,7 +47,6 @@ ADS1115_lite adc(ADS1115_DEFAULT_ADDRESS);     // Use this for the 16-bit versio
 #endif
 
 #ifdef ARDUINO_TEENSY41
-//uint8_t Ethernet::buffer[200]; // udp send and receive buffer
 uint8_t autoSteerUdpData[UDP_TX_PACKET_MAX_SIZE];  // Buffer For Receiving UDP Data
 #endif
 
@@ -95,10 +91,22 @@ uint8_t tram = 0;
  uint8_t pgn = 0, dataLength = 0, idx = 0;
 boolean goDown = false, endDown = false , bitState = false, bitStateOld = false;  //CAN Hitch Control
 byte hydLift = 0;
-byte goPress[8]        = {0x15, 0x20, 0x06, 0xCA, 0x80, 0x01, 0x00, 0x00} ;    //  press big go
-byte goLift[8]         = {0x15, 0x20, 0x06, 0xCA, 0x00, 0x02, 0x00, 0x00} ;    //  lift big go
-byte endPress[8]       = {0x15, 0x21, 0x06, 0xCA, 0x80, 0x03, 0x00, 0x00} ;    //  press big end
-byte endLift[8]        = {0x15, 0x21, 0x06, 0xCA, 0x00, 0x04, 0x00, 0x00} ;    //  lift big end
+// brand = 5
+byte goPress[8]        = {0x15, 0x33, 0x1E, 0xCA, 0x80, 0x01, 0x00, 0x00} ;    //  press big go
+byte goLift[8]         = {0x15, 0x33, 0x1E, 0xCA, 0x00, 0x02, 0x00, 0x00} ;    //  lift big go
+byte endPress[8]       = {0x15, 0x34, 0x1E, 0xCA, 0x80, 0x03, 0x00, 0x00} ;    //  press big end
+byte endLift[8]        = {0x15, 0x34, 0x1E, 0xCA, 0x00, 0x04, 0x00, 0x00} ;    //  lift big end
+// brand = 3
+//byte goPress[8]        = {0x15, 0x20, 0x06, 0xCA, 0x80, 0x01, 0x00, 0x00} ;    //  press big go
+//byte goLift[8]         = {0x15, 0x20, 0x06, 0xCA, 0x00, 0x02, 0x00, 0x00} ;    //  lift big go
+//byte endPress[8]       = {0x15, 0x21, 0x06, 0xCA, 0x80, 0x03, 0x00, 0x00} ;    //  press big end
+//byte endLift[8]        = {0x15, 0x21, 0x06, 0xCA, 0x00, 0x04, 0x00, 0x00} ;    //  lift big end
+// autres valeurs a test
+//byte goPress[8]        = {0x15, 0x22, 0x06, 0xCA, 0x80, 0x01, 0x00, 0x00} ;    //  press little go
+//byte goLift[8]         = {0x15, 0x22, 0x06, 0xCA, 0x00, 0x02, 0x00, 0x00} ;    //  lift little go
+//byte endPress[8]       = {0x15, 0x23, 0x06, 0xCA, 0x80, 0x03, 0x00, 0x00} ;    //  press little end
+//byte endLift[8]        = {0x15, 0x23, 0x06, 0xCA, 0x00, 0x04, 0x00, 0x00} ;    //  lift little end
+
 
 byte csm1Press[8] = { 0xF1, 0xFC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x67 }; // CLAAS CSM1 button press pre MR tractors
 byte csm2Press[8] = { 0xF4, 0xFC, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x3F }; // CLAAS CSM2 button press pre MR tractors
@@ -116,10 +124,16 @@ bool engageCAN = false;          //Variable for Engage from CAN
 bool workCAN = false;
 long unsigned int lastIdActive = 0;
 uint8_t KBUSRearHitch = 250;    //Variable for hitch height from KBUS (0-250 *0.4 = 0-100%) - CaseIH tractor bus
+
+uint8_t countHyd = 0; // Compteur pour le temps d'appui bouton Fendt
+
 uint32_t myTime;
 uint32_t lastpush;
 uint32_t Time;
 uint32_t relayTime;
+
+uint8_t lastHydLift = 0;
+uint32_t lastpushbutton = 0;
 
 //speed sent as *10
 float gpsSpeed = 0;
@@ -197,10 +211,6 @@ void autosteerSetup()
 	pinMode(WORKSW_PIN, INPUT_PULLUP);
 	pinMode(STEERSW_PIN, INPUT_PULLUP);
 
-	// Disable digital inputs for analog input pins
-	//pinMode(CURRENT_SENSOR_PIN, INPUT_DISABLE);
-	pinMode(PRESSURE_SENSOR_PIN, INPUT_DISABLE);
-
 	//set up communication
 	Wire1.end();
 	Wire1.begin();
@@ -215,9 +225,6 @@ void autosteerSetup()
 		Serial.println("ADC Connecton FAILED!");
 		Autosteer_running = false;
 	}
-
-	//50Khz I2C
-	//TWBR = 144;   //Is this needed?
 
 	EEPROM.get(0, EEread);              // read identifier
 
@@ -238,7 +245,11 @@ void autosteerSetup()
 	}
 
 	steerSettingsInit();
-  sectionControlSetup(); // ajoutés par FlorianT
+  if (sectionout == 1)
+      {
+        sectionControlSetup(); // ajoutés par FlorianT
+      }
+  
 	if (Autosteer_running)
 	{
 		Serial.println("Autosteer running, waiting for AgOpenGPS");
@@ -246,7 +257,6 @@ void autosteerSetup()
 	else
 	{
 		Autosteer_running = false;  //Turn off auto steer if no ethernet (Maybe running T4.0)
-		//    if(!Ethernet_running)Serial.println("Ethernet not available");
 		Serial.println("Autosteer disabled, GPS only mode");
 		return;
 	}
@@ -260,7 +270,6 @@ void autosteerLoop()
 #ifdef ARDUINO_TEENSY41
 	ReceiveUdp();
 #endif
-	//Serial.println("AutoSteer loop");
 
 	// Loop triggers every 100 msec and sends back gyro heading, and roll, steer angle etc
 	currentTime = systick_millis_count;
@@ -277,7 +286,6 @@ void autosteerLoop()
 
     if (watchdogKeya++ > 200) {
       watchdogKeya = 0;
-      //digitalWrite(PWM2_RPWM, LOW);
     }
 
 		//read all the switches
@@ -291,7 +299,11 @@ void autosteerLoop()
 		else if (steerConfig.SteerButton == 1)    //steer Button momentary
 		{
 			reading = digitalRead(STEERSW_PIN);
-      if (engageCAN) reading = LOW;              //CAN Engage is ON (Button is Pressed)
+      if (engageCAN)
+      {
+        reading = LOW;              //CAN Engage is ON (Button is Pressed)
+        engageCAN = false;          //mod test thibault
+      }
 			if (reading == LOW && previous == HIGH)
 			{
 				if (currentState == 1)
@@ -309,9 +321,6 @@ void autosteerLoop()
 		}
 		else                                      // No steer switch and no steer button
 		{
-			// So set the correct value. When guidanceStatus = 1,
-			// it should be on because the button is pressed in the GUI
-			// But the guidancestatus should have set it off first
 			if (guidanceStatusChanged && guidanceStatus == 1 && steerSwitch == 1 && previous == 0)
 			{
 				steerSwitch = 0;
@@ -333,20 +342,6 @@ void autosteerLoop()
 			previous = 0;
 		}
 
-		// Pressure sensor?
-		if (steerConfig.PressureSensor)
-		{
-			sensorSample = (float)analogRead(PRESSURE_SENSOR_PIN);
-			sensorSample *= 0.25;
-			sensorReading = sensorReading * 0.6 + sensorSample * 0.4;
-			if (sensorReading >= steerConfig.PulseCountMax)
-			{
-				steerSwitch = 1; // reset values like it turned off
-				currentState = 1;
-				previous = 0;
-			}
-		}
-
 		// Current sensor?
 		if (steerConfig.CurrentSensor)
 		{
@@ -359,8 +354,8 @@ void autosteerLoop()
       }
 		}
 
-		switchByte = 0;
-		switchByte |= (steerSwitch << 2);
+    switchByte = 0;
+    switchByte |= (steerSwitch << 2);
 		switchByte |= (steerSwitch << 1);   //put steerswitch status in bit 1 position
 		switchByte |= workSwitch;
 
@@ -385,9 +380,6 @@ void autosteerLoop()
 		}
 
 		//DETERMINE ACTUAL STEERING POSITION
-
-		//convert position to steer angle. 32 counts per degree of steer pot position in my case
-		//  ***** make sure that negative steer angle makes a left turn and positive value is a right turn *****
 		if (steerConfig.InvertWAS)
 		{
 			steeringPosition = (steeringPosition - 6805 - steerSettings.wasOffset);   // 1/2 of full scale
@@ -405,7 +397,6 @@ void autosteerLoop()
 		if (watchdogTimer < WATCHDOG_THRESHOLD)
   		{
   			steerAngleError = steerAngleActual - steerAngleSetPoint;   //calculate the steering error
-  			//if (abs(steerAngleError)< steerSettings.lowPWM) steerAngleError = 0;
   
   			calcSteeringPID();  //do the pid
   			motorDrive();       //out to motors the pwm value
@@ -417,38 +408,14 @@ void autosteerLoop()
   			motorDrive(); //out to motors the pwm value
   			pulseCount = 0;
   		}
+     if (Brand == 3 || Brand == 5) SetRelaysFendt();  //If Brand = Fendt run the hitch control bottom of this page
+     if (Brand == 0) SetRelaysClaas();  //If Brand = Claas run the hitch control bottom of this page
 	} //end of timed loop
 
-	//This runs continuously, outside of the timed loop, keeps checking for new udpData, turn sense
-	//delay(1);
-
-	// Speed pulse
-	if (gpsSpeedUpdateTimer < 1000)
-	{
-		if (speedPulseUpdateTimer > 200) // 100 (10hz) seems to cause tone lock ups occasionally
-		{
-			speedPulseUpdateTimer = 0;
-
-			//130 pp meter, 3.6 kmh = 1 m/sec = 130hz or gpsSpeed * 130/3.6 or gpsSpeed * 36.1111
-			//gpsSpeed = ((float)(autoSteerUdpData[5] | autoSteerUdpData[6] << 8)) * 0.1;
-			float speedPulse = gpsSpeed * 36.1111;
-
-			//Serial.print(gpsSpeed); Serial.print(" -> "); Serial.println(speedPulse);
-
-			if (gpsSpeed > 0.11) { // 0.10 wasn't high enough
-				tone(velocityPWM_Pin, uint16_t(speedPulse));
-			}
-			else {
-				noTone(velocityPWM_Pin);
-			}
-		}
-	}
-	else  // if gpsSpeedUpdateTimer hasn't update for 1000 ms, turn off speed pulse
-	{
-		noTone(velocityPWM_Pin);
-	}
-sectionControlLoop(); // ajout FlorianT
-
+  if (sectionout == 1)
+      {
+        sectionControlLoop(); // ajout FlorianT
+      }
 } // end of main loop
 
 int currentRoll = 0;
@@ -466,12 +433,6 @@ void ReceiveUdp()
 	}
 
 	uint16_t len = Eth_udpAutoSteer.parsePacket();
-
-	// if (len > 0)
-	// {
-	//  Serial.print("ReceiveUdp: ");
-	//  Serial.println(len);
-	// }
 
 	// Check for len > 4, because we check byte 0, 1, 3 and 3
 	if (len > 4)
@@ -493,11 +454,6 @@ void ReceiveUdp()
 				//Bit 8,9    set point steer angle * 100 is sent
 				steerAngleSetPoint = ((float)(autoSteerUdpData[8] | ((int8_t)autoSteerUdpData[9]) << 8)) * 0.01; //high low bytes
 
-				//Serial.print("steerAngleSetPoint: ");
-				//Serial.println(steerAngleSetPoint);
-
-				//Serial.println(gpsSpeed);
-
 				if ((bitRead(guidanceStatus, 0) == 0) || (gpsSpeed < 0.1) || (steerSwitch == 1))
 				{
 					watchdogTimer = WATCHDOG_FORCE_VALUE; //turn off steering motor
@@ -506,15 +462,6 @@ void ReceiveUdp()
 				{
 					watchdogTimer = 0;  //reset watchdog
 				}
-
-				//Bit 10 Tram
-				tram = autoSteerUdpData[10];
-
-				//Bit 11
-				relay = autoSteerUdpData[11];
-
-				//Bit 12
-				relayHi = autoSteerUdpData[12];
 
 				//----------------------------------------------------------------------------
 				//Serial Send to agopenGPS
@@ -653,12 +600,11 @@ void ReceiveUdp()
 
 					SendUdp(helloFromAutoSteer, sizeof(helloFromAutoSteer), Eth_ipDestination, portDestination);
 				}
-				if (useBNO08x)
+				if (useBNO08x || useTM171)
 				{
 					SendUdp(helloFromIMU, sizeof(helloFromIMU), Eth_ipDestination, portDestination);
 				}
-          //SendUdp(helloFromMachine, sizeof(helloFromMachine), Eth_ipDestination, portDestination);
-          //sendHelloToAgIO();
+
         helloFromMachine[5] = relay;
         helloFromMachine[6] = relayHi;
     
@@ -668,7 +614,7 @@ void ReceiveUdp()
               CK_A = (CK_A + helloFromMachine[i]);
           }
         helloFromMachine[sizeof(helloFromMachine) - 1] = CK_A;
-    SendUdp(helloFromMachine, sizeof(helloFromMachine), Eth_ipDestination, portDestination);
+        SendUdp(helloFromMachine, sizeof(helloFromMachine), Eth_ipDestination, portDestination);
 			}
 
 			else if (autoSteerUdpData[3] == 201)
@@ -727,7 +673,8 @@ void ReceiveUdp()
                 //set1 
                 uint8_t sett = autoSteerUdpData[8];  //setting0     
                 if (bitRead(sett, 0)) aogConfig.isRelayActiveHigh = 1; else aogConfig.isRelayActiveHigh = 0;
-                if (bitRead(sett, 1)) aogConfig.enableToolLift = 1; else aogConfig.enableToolLift = 0;  
+                if (bitRead(sett,1)) aogConfig.enableToolLift = 1; else aogConfig.enableToolLift = 0;  
+
                 aogConfig.user1 = autoSteerUdpData[9];
                 aogConfig.user2 = autoSteerUdpData[10];
                 aogConfig.user3 = autoSteerUdpData[11];
@@ -774,4 +721,57 @@ void EncoderFunc()
 	}
 }
 
+//Hitch Control------------------------------------------------------------
+void SetRelaysFendt(void)
+{
+  uint32_t currentMillis = millis();
 
+
+  if (currentMillis - lastpushbutton >= 300) {
+      if (goDown)  liftGo();  
+      if (endDown) liftEnd();
+  }
+
+//If Invert Relays is selected in hitch settings, Section 1 is used as trigger.
+  if (aogConfig.isRelayActiveHigh == 1){
+    bitState = (bitRead(relay, 0));
+  }
+//If not selected hitch command is used on headland used as Trigger  
+  else{
+    if (hydLift == 1) {bitState = 1;}
+    if (hydLift == 2) {bitState = 0;}
+}
+if (aogConfig.enableToolLift == 1){
+  if (bitState  && !bitStateOld) 
+    {
+      lastpushbutton = currentMillis;
+    }
+  if (!bitState && bitStateOld) 
+  {
+    pressEnd(); //Press End button - CAN Page
+    lastpushbutton = currentMillis;
+  }
+}
+bitStateOld = bitState;
+}
+
+
+void SetRelaysClaas(void)
+{
+//If Invert Relays is selected in hitch settings, Section 1 is used as trigger.  
+if (aogConfig.isRelayActiveHigh == 1){
+    bitState = (bitRead(relay, 0));
+  }
+//If not selected hitch command is used on headland used as Trigger  
+  else{
+    if (hydLift == 1) bitState = 1;
+    if (hydLift == 2) bitState = 0;    
+  }
+//Only if tool lift is enabled AgOpen will press headland buttions via CAN
+if (aogConfig.enableToolLift == 1){
+  if (bitState  && !bitStateOld) pressCSM1(); //Press Go button - CAN Page
+  if (!bitState && bitStateOld) pressCSM2(); //Press End button - CAN Page
+}
+
+  bitStateOld = bitState;
+}
